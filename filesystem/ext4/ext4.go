@@ -1617,10 +1617,7 @@ func (fs *FileSystem) Stat(p string) (iofs.FileInfo, error) {
 		size:    int64(in.size),
 		isDir:   entry.fileType == dirFileTypeDirectory,
 		mode:    in.permissionsToMode(),
-		sys: &StatT{
-			UID: in.owner,
-			GID: in.group,
-		},
+		sys:     in.stat(),
 	}, nil
 }
 
