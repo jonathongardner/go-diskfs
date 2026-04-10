@@ -406,31 +406,32 @@ func (de *directoryEntry) getLocation(p string) (location, size uint32, err erro
 				}
 			}
 			if checkFilename == current {
-				if len(parts) > 1 {
-					// just dig down further - what if it looks like a file, but is a relocated directory?
-					if !entry.isSubdirectory && de.filesystem.suspEnabled && !entry.isSelf && !entry.isParent {
-						for _, e := range de.filesystem.suspExtensions {
-							location2 := e.GetDirectoryLocation(entry)
-							if location2 != 0 {
-								// need to get the directory entry for the child
-								dirb := make([]byte, de.filesystem.blocksize)
-								n, err2 := de.filesystem.backend.ReadAt(dirb, int64(location2)*de.filesystem.blocksize)
-								if err2 != nil {
-									return 0, 0, fmt.Errorf("could not read bytes of relocated directory %s from block %d: %v", checkFilename, location2, err2)
-								}
-								if n != len(dirb) {
-									return 0, 0, fmt.Errorf("read %d bytes instead of expected %d for relocated directory %s from block %d: %v", n, len(dirb), checkFilename, location2, err)
-								}
-								// get the size of the actual directory entry
-								size2 := dirb[0]
-								entry, err2 = parseDirEntry(dirb[:size2], de.filesystem)
-								if err2 != nil {
-									return 0, 0, fmt.Errorf("error converting bytes to a directory entry for relocated directory %s from block %d: %v", checkFilename, location2, err2)
-								}
-								break
+				// check if this is a placeholder for a relocated directory (CL extension)
+				if !entry.isSubdirectory && de.filesystem.suspEnabled && !entry.isSelf && !entry.isParent {
+					for _, e := range de.filesystem.suspExtensions {
+						location2 := e.GetDirectoryLocation(entry)
+						if location2 != 0 {
+							// need to get the directory entry for the child
+							dirb := make([]byte, de.filesystem.blocksize)
+							n, err2 := de.filesystem.backend.ReadAt(dirb, int64(location2)*de.filesystem.blocksize)
+							if err2 != nil {
+								return 0, 0, fmt.Errorf("could not read bytes of relocated directory %s from block %d: %v", checkFilename, location2, err2)
 							}
+							if n != len(dirb) {
+								return 0, 0, fmt.Errorf("read %d bytes instead of expected %d for relocated directory %s from block %d: %v", n, len(dirb), checkFilename, location2, err)
+							}
+							// get the size of the actual directory entry
+							size2 := dirb[0]
+							entry, err2 = parseDirEntry(dirb[:size2], de.filesystem)
+							if err2 != nil {
+								return 0, 0, fmt.Errorf("error converting bytes to a directory entry for relocated directory %s from block %d: %v", checkFilename, location2, err2)
+							}
+							break
 						}
 					}
+				}
+				if len(parts) > 1 {
+					// dig down further
 					location, size, err = entry.getLocation(path.Join(parts[1:]...))
 					if err != nil {
 						return 0, 0, fmt.Errorf("could not get location: %v", err)
@@ -482,8 +483,17 @@ func (de *directoryEntry) Size() int64 {
 // Mode() FileMode     // file mode bits
 func (de *directoryEntry) Mode() os.FileMode {
 	for _, ext := range de.extensions {
-		if s, ok := ext.(rockRidgeSymlink); ok && !s.continued {
-			return 0o755 | os.ModeSymlink
+		if px, ok := ext.(rockRidgePosixAttributes); ok {
+			return px.mode
+		}
+	}
+	// Fallback for non-Rock Ridge
+	if de.isSubdirectory {
+		return os.ModeDir | 0o755
+	}
+	for _, ext := range de.extensions {
+		if _, ok := ext.(rockRidgeSymlink); ok {
+			return os.ModeSymlink | 0o777
 		}
 	}
 	return 0o755
@@ -509,8 +519,33 @@ func (de *directoryEntry) IsDir() bool {
 	return de.isSubdirectory
 }
 
+// RockRidgeInfo holds POSIX metadata from Rock Ridge extensions.
+type RockRidgeInfo struct {
+	UID     uint32
+	GID     uint32
+	Nlink   uint32
+	Mode    os.FileMode
+	Symlink string
+}
+
 // Sys() interface{}   // underlying data source (can return nil)
 func (de *directoryEntry) Sys() interface{} {
+	for _, ext := range de.extensions {
+		if px, ok := ext.(rockRidgePosixAttributes); ok {
+			rri := &RockRidgeInfo{
+				UID:   px.uid,
+				GID:   px.gid,
+				Nlink: px.linkCount,
+				Mode:  px.mode,
+			}
+			for _, ext2 := range de.extensions {
+				if sl, ok := ext2.(rockRidgeSymlink); ok {
+					rri.Symlink = sl.name
+				}
+			}
+			return rri
+		}
+	}
 	return nil
 }
 
