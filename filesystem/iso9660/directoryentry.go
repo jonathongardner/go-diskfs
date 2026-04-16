@@ -38,6 +38,7 @@ type directoryEntry struct {
 	hasMoreEntries           bool
 	isSelf                   bool
 	isParent                 bool
+	joliet                   bool
 	volumeSequence           uint16
 	filesystem               *FileSystem
 	filename                 string
@@ -52,6 +53,8 @@ func (de *directoryEntry) countNamelenBytes() int {
 		namelen = 1
 	case de.isParent:
 		namelen = 1
+	case de.joliet:
+		namelen = len(ucs2StringToBytes(de.filename))
 	default:
 		namelen = len(de.filename)
 	}
@@ -117,6 +120,8 @@ func (de *directoryEntry) toBytes(skipExt bool, ceBlocks []uint32) ([][]byte, er
 		filenameBytes = []byte{0x00}
 	case de.isParent:
 		filenameBytes = []byte{0x01}
+	case de.joliet:
+		filenameBytes = ucs2StringToBytes(de.filename)
 	default:
 		// first validate the filename
 		err = validateFilename(de.filename, de.isSubdirectory, de.filesystem.suspEnabled)
@@ -137,8 +142,9 @@ func (de *directoryEntry) toBytes(skipExt bool, ceBlocks []uint32) ([][]byte, er
 	copy(b[33:], filenameBytes)
 
 	// output directory entry extensions - but only if we did not skip it
+	// Joliet SVD entries don't carry SUSP; Rock Ridge extensions live in the PVD tree only
 	var extBytes [][]byte
-	if !skipExt {
+	if !skipExt && !de.joliet {
 		extBytes, err = dirEntryExtensionsToBytes(de.extensions, directoryEntryMaxSize-len(b), de.filesystem.blocksize, ceBlocks)
 		if err != nil {
 			return nil, fmt.Errorf("enable to convert directory entry SUSP extensions to bytes: %v", err)
@@ -200,6 +206,10 @@ func dirEntryExtensionsToBytes(extensions []directoryEntrySystemUseExtension, ma
 }
 
 func dirEntryFromBytes(b []byte, ext []suspExtension) (*directoryEntry, error) {
+	return dirEntryFromBytesWithJoliet(b, ext, false)
+}
+
+func dirEntryFromBytesWithJoliet(b []byte, ext []suspExtension, joliet bool) (*directoryEntry, error) {
 	// has to be at least 34 bytes
 	if len(b) < int(directoryEntryMinSize) {
 		return nil, fmt.Errorf("cannot read directoryEntry from %d bytes, fewer than minimum of %d bytes", len(b), directoryEntryMinSize)
@@ -243,13 +253,16 @@ func dirEntryFromBytes(b []byte, ext []suspExtension) (*directoryEntry, error) {
 	case namelen == 1 && nameBytes[0] == 0x01:
 		filename = ""
 		isParent = true
+	case joliet:
+		filename = bytesToUCS2String(nameBytes)
 	default:
 		filename = string(nameBytes)
 	}
 
 	// and now for extensions in the system use area
+	// Joliet SVD entries don't carry SUSP; Rock Ridge extensions live in the PVD tree only
 	suspFields := make([]directoryEntrySystemUseExtension, 0)
-	if len(b) > 33+int(nameLenWithPadding) {
+	if !joliet && len(b) > 33+int(nameLenWithPadding) {
 		var err error
 		suspFields, err = parseDirectoryEntryExtensions(b[33+nameLenWithPadding:], ext)
 		if err != nil {
@@ -270,6 +283,7 @@ func dirEntryFromBytes(b []byte, ext []suspExtension) (*directoryEntry, error) {
 		hasMoreEntries:           hasMoreEntries,
 		isSelf:                   isSelf,
 		isParent:                 isParent,
+		joliet:                   joliet,
 		volumeSequence:           volumeSequence,
 		filename:                 filename,
 		extensions:               suspFields,
@@ -357,6 +371,28 @@ func parseDirEntries(b []byte, f *FileSystem) ([]*directoryEntry, error) {
 		if de != nil {
 			dirEntries = append(dirEntries, de)
 		}
+		i += entryLen
+	}
+	return dirEntries, nil
+}
+
+// parseDirEntriesJoliet parses directory entries from a Joliet (SVD) directory extent.
+// Filenames are decoded as UCS-2 and no SUSP extensions are parsed.
+func parseDirEntriesJoliet(b []byte, f *FileSystem) ([]*directoryEntry, error) {
+	dirEntries := make([]*directoryEntry, 0, 20)
+	count := 0
+	for i := 0; i < len(b); count++ {
+		entryLen := int(b[i+0])
+		if entryLen == 0 {
+			i += (int(f.blocksize) - i%int(f.blocksize))
+			continue
+		}
+		de, err := dirEntryFromBytesWithJoliet(b[i:i+entryLen], nil, true)
+		if err != nil {
+			return nil, fmt.Errorf("invalid Joliet directory entry %d at byte %d: %v", count, i, err)
+		}
+		de.filesystem = f
+		dirEntries = append(dirEntries, de)
 		i += entryLen
 	}
 	return dirEntries, nil
