@@ -17,14 +17,9 @@ const (
 	uint32max uint64 = 0xffffffff
 )
 
-func universalizePath(p string) string {
-	// globalize the separator
-	return strings.ReplaceAll(p, `\`, "/")
-}
 func splitPath(p string) []string {
-	ps := universalizePath(p)
 	// we need to split such that each one ends in "/", except possibly the last one
-	parts := strings.Split(ps, "/")
+	parts := strings.Split(p, "/")
 	// eliminate empty parts
 	ret := make([]string, 0)
 	for _, sub := range parts {
