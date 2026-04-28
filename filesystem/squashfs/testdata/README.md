@@ -4,6 +4,7 @@ This directory contains test fixtures for squashfs filesystems. Specifically, it
 
 * `file.sqs`: A 10MB squashfs image
 * `read_test.sqs`: A 3MB squashfs image for testing different reads sizes
+* `backslash.sqs`: A small squashfs image containing a file with a literal backslash in its name
 
 To generate the `.sqs` files:
 
@@ -19,3 +20,7 @@ We make the `/foo` directory with sufficient entries to exceed a single sector (
 ## `read_test.sqs`
 
 This contains files of sizes around binary boundaries designed to exercise the corner cases in the block reading code.
+
+## `backslash.sqs`
+
+This contains `bar/baz\baz`, where the backslash is part of the file name.

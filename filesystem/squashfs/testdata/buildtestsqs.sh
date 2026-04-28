@@ -99,3 +99,19 @@ done
 
 mksquashfs . /data/dir_read.sqs  -comp zstd -Xcompression-level 3 -b 4k -all-root
 EOF
+
+rm -f backslash.sqs
+
+cat << "EOF" | docker run -i --rm -v $PWD:/data alpine:3.22
+set -e
+apk --update add squashfs-tools coreutils
+mkdir -p /build/bar
+mkdir -p '/build/baz\dir'
+cd /build
+printf 'foo\n' > foo
+printf 'backslash\n' > 'bar/baz\baz'
+printf 'backslash dir\n' > 'baz\dir/bar'
+
+# compressed version with a literal backslash in a filename
+mksquashfs . /data/backslash.sqs
+EOF

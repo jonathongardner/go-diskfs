@@ -17,6 +17,7 @@ import (
 const (
 	Squashfsfile             = "./testdata/file.sqs"
 	SquashfsUncompressedfile = "./testdata/file_uncompressed.sqs"
+	SquashfsBackslashfile    = "./testdata/backslash.sqs"
 	SquashfsfileListing      = "./testdata/list.txt"
 	SquashfsReadTestFile     = "./testdata/read_test.sqs"
 	SquashfsReatTestMd5sums  = "./testdata/read_test.md5sums"

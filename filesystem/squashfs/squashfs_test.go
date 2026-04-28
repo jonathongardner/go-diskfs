@@ -514,6 +514,114 @@ func TestSquashfsCheckListing(t *testing.T) {
 	}
 }
 
+// Check extract squashfs fs with backslash correctly
+func TestSquashfsBackslashCheckListing(t *testing.T) {
+	// Open the squash file
+	f, err := os.Open(squashfs.SquashfsBackslashfile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	b := file.New(f, true)
+	// create the filesystem
+	fs, err := squashfs.Read(b, fi.Size(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootEntries, err := fs.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootListing := map[string]iofs.DirEntry{}
+	for _, entry := range rootEntries {
+		rootListing[entry.Name()] = entry
+	}
+	if len(rootListing) != 3 {
+		t.Fatalf("expected 3 entry in bar, got %d", len(rootListing))
+	}
+	if _, ok := rootListing["foo"]; !ok {
+		t.Fatal(`expected root entry "foo"`)
+	}
+	bar, ok := rootListing["bar"]
+	if !ok {
+		t.Fatal(`expected root entry "bar"`)
+	}
+	if !bar.IsDir() {
+		t.Fatal(`expected "bar" to be a directory`)
+	}
+	bazDir, ok := rootListing[`baz\dir`]
+	if !ok {
+		t.Fatal(`expected root entry "baz\dir"`)
+	}
+	if !bazDir.IsDir() {
+		t.Fatal(`expected "bar" to be a directory`)
+	}
+
+	barEntries, err := fs.ReadDir("bar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(barEntries) != 1 {
+		t.Fatalf("expected 1 entry in bar, got %d", len(barEntries))
+	}
+	if got, want := barEntries[0].Name(), `baz\baz`; got != want {
+		t.Fatalf("expected backslash filename %q, got %q", want, got)
+	}
+
+	info, err := fs.Stat(`bar/baz\baz`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := info.Name(), `baz\baz`; got != want {
+		t.Fatalf("expected stat name %q, got %q", want, got)
+	}
+
+	contents, err := fs.ReadFile(`bar/baz\baz`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(contents), "backslash\n"; got != want {
+		t.Fatalf("expected backslash file contents %q, got %q", want, got)
+	}
+
+	bazDirEntries, err := fs.ReadDir(`baz\dir`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(barEntries) != 1 {
+		t.Fatalf("expected 1 entry in bar, got %d", len(bazDirEntries))
+	}
+	if got, want := barEntries[0].Name(), `baz\baz`; got != want {
+		t.Fatalf("expected backslash filename %q, got %q", want, got)
+	}
+
+	info2, err := fs.Stat(`baz\dir/bar`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := info2.Name(), `bar`; got != want {
+		t.Fatalf("expected stat name %q, got %q", want, got)
+	}
+
+	contents2, err := fs.ReadFile(`baz\dir/bar`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(contents2), "backslash dir\n"; got != want {
+		t.Fatalf("expected backslash file contents %q, got %q", want, got)
+	}
+
+	if _, err := fs.OpenFile("bar/baz/baz", os.O_RDONLY); err == nil {
+		t.Fatal("expected slash-separated path to fail")
+	}
+}
+
 // readTest describes a file reading test
 type readTest struct {
 	name   string
